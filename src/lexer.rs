@@ -97,6 +97,7 @@ impl Lexer {
                         "return" => Token::Return,
                         "true" => Token::True,
                         "false" => Token::False,
+                        "null" => Token::Null,
                         "print" => Token::Print,
                         _ => Token::Identifier(literal),
                     };

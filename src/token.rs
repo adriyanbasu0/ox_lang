@@ -9,6 +9,7 @@ pub enum Token {
     Return, // return
     True,   // true
     False,  // false
+    Null,   // null
     Print,  // print (for a simple print function)
 
     // Operators

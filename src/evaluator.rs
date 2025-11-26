@@ -3,27 +3,52 @@ use crate::ast::{BlockStatement, Expression, Program, Statement};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
+use rand::Rng;
+
+
 
 pub const NULL: Object = Object::Null;
 pub const TRUE: Object = Object::Boolean(true);
 pub const FALSE: Object = Object::Boolean(false);
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 pub enum Object {
     Integer(i64),
     Boolean(bool),
     String(String),
     Return(Box<Object>),
     Function(Function),
+    Builtin(fn(Vec<Object>) -> Object),
+    Some(Box<Object>),
+    Ok,
     Null,
     Error(String),
 }
 
-#[derive(Debug, PartialEq, Clone)]
 pub struct Function {
     pub parameters: Vec<crate::ast::Identifier>,
     pub body: BlockStatement,
     pub env: Rc<RefCell<Environment>>,
+}
+
+impl fmt::Debug for Function {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Function")
+         .field("parameters", &self.parameters)
+         .field("body", &self.body)
+         .field("env", &"// Rc<RefCell<Environment>>") // Placeholder for env
+         .finish()
+    }
+}
+
+impl Clone for Function {
+    fn clone(&self) -> Self {
+        Function {
+            parameters: self.parameters.clone(),
+            body: self.body.clone(),
+            env: self.env.clone(),
+        }
+    }
 }
 
 impl Object {
@@ -42,6 +67,9 @@ impl Object {
             Object::String(_) => "STRING",
             Object::Return(_) => "RETURN_VALUE",
             Object::Function(_) => "FUNCTION",
+            Object::Builtin(_) => "BUILTIN",
+            Object::Some(_) => "SOME",
+            Object::Ok => "OK",
             Object::Null => "NULL",
             Object::Error(_) => "ERROR",
         }
@@ -59,30 +87,110 @@ impl fmt::Display for Object {
                 let params: Vec<String> = func.parameters.iter().map(|p| p.value.clone()).collect();
                 write!(f, "fn({}) {{ ... }}", params.join(", "))
             },
+            Object::Builtin(_) => write!(f, "builtin function"),
+            Object::Some(value) => write!(f, "some({})", value),
+            Object::Ok => write!(f, "ok"),
             Object::Null => write!(f, "null"),
             Object::Error(value) => write!(f, "ERROR: {}", value),
         }
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
 pub struct Environment {
     store: HashMap<String, Object>,
     outer: Option<Rc<RefCell<Environment>>>,
+    pub writer: Rc<RefCell<dyn std::io::Write>>,
+}
+
+pub fn builtin_type(args: Vec<Object>) -> Object {
+    if args.len() != 1 {
+        return Object::Error(format!(
+            "Wrong number of arguments. got={}, want=1",
+            args.len()
+        ));
+    }
+    Object::String(args[0].type_str().to_string())
+}
+
+pub fn builtin_rand(args: Vec<Object>) -> Object {
+    if args.len() != 2 {
+        return Object::Error(format!(
+            "Wrong number of arguments. got={}, want=2",
+            args.len()
+        ));
+    }
+
+    let min = match args[0] {
+        Object::Integer(i) => i,
+        _ => return Object::Error(format!("Argument must be an integer, got {}", args[0].type_str())),
+    };
+
+    let max = match args[1] {
+        Object::Integer(i) => i,
+        _ => return Object::Error(format!("Argument must be an integer, got {}", args[1].type_str())),
+    };
+
+    let mut rng = rand::thread_rng();
+    Object::Integer(rng.gen_range(min..=max))
+}
+
+pub fn builtin_some(args: Vec<Object>) -> Object {
+    if args.len() != 1 {
+        return Object::Error(format!(
+            "Wrong number of arguments. got={}, want=1",
+            args.len()
+        ));
+    }
+    Object::Some(Box::new(args[0].clone()))
+}
+
+pub fn builtin_err(args: Vec<Object>) -> Object {
+    if args.len() != 1 {
+        return Object::Error(format!(
+            "Wrong number of arguments. got={}, want=1",
+            args.len()
+        ));
+    }
+    match &args[0] {
+        Object::String(s) => Object::Error(s.clone()),
+        _ => Object::Error(format!(
+            "Argument to `err` must be a string, got {}",
+            args[0].type_str()
+        )),
+    }
+}
+
+pub fn builtin_ok(args: Vec<Object>) -> Object {
+    if !args.is_empty() {
+        return Object::Error(format!(
+            "Wrong number of arguments. got={}, want=0",
+            args.len()
+        ));
+    }
+    Object::Ok
 }
 
 impl Environment {
-    pub fn new() -> Self {
+    pub fn new(writer: Rc<RefCell<dyn std::io::Write>>) -> Self {
+        let mut store = HashMap::new();
+        store.insert("ok".to_string(), Object::Builtin(builtin_ok));
+        store.insert("some".to_string(), Object::Builtin(builtin_some));
+        store.insert("err".to_string(), Object::Builtin(builtin_err));
+        store.insert("type".to_string(), Object::Builtin(builtin_type));
+        store.insert("rand".to_string(), Object::Builtin(builtin_rand));
         Environment {
-            store: HashMap::new(),
+            store,
             outer: None,
+            writer,
         }
     }
 
     pub fn new_enclosed_environment(outer: Rc<RefCell<Environment>>) -> Self {
+        let writer = outer.borrow().writer.clone();
         Environment {
             store: HashMap::new(),
             outer: Some(outer),
+            writer,
         }
     }
 
@@ -135,11 +243,15 @@ fn eval_statement(statement: Statement, env: Rc<RefCell<Environment>>) -> Object
 }
 
 fn eval_print_statement(expression: Expression, env: Rc<RefCell<Environment>>) -> Object {
-    let value = eval_expression(expression, env);
+    
+    let value = eval_expression(expression, env.clone());
     if is_error(&value) {
         return value;
     }
-    println!("{}", value);
+    let env_ref = env.borrow_mut();
+    let mut writer = env_ref.writer.borrow_mut();
+    writeln!(writer, "{}", value).expect("Failed to write to output");
+    writer.flush().expect("Failed to flush output");
     NULL
 }
 
@@ -148,6 +260,7 @@ fn eval_expression(expression: Expression, env: Rc<RefCell<Environment>>) -> Obj
         Expression::IntLiteral(int) => Object::Integer(int.value),
         Expression::Boolean(boolean) => native_bool_to_boolean_object(boolean.value),
         Expression::StringLiteral(s) => Object::String(s.value),
+        Expression::Null => NULL,
         Expression::Prefix(prefix) => {
             let right = eval_expression(*prefix.right, env);
             if is_error(&right) {
@@ -192,10 +305,6 @@ fn eval_expression(expression: Expression, env: Rc<RefCell<Environment>>) -> Obj
             }
 
             let args = eval_expressions(call_exp.arguments, env);
-            if args.len() == 1 && is_error(&args[0]) {
-                return args[0].clone();
-            }
-
             apply_function(function, args)
         }
     }
@@ -222,10 +331,10 @@ fn eval_prefix_expression(operator: crate::token::Token, right: Object) -> Objec
 
 fn eval_bang_operator_expression(right: Object) -> Object {
     match right {
-        TRUE => FALSE,
-        FALSE => TRUE,
-        NULL => TRUE,
-        _ => FALSE,
+        Object::Boolean(true) => Object::Boolean(false),
+        Object::Boolean(false) => Object::Boolean(true),
+        Object::Null => Object::Boolean(true),
+        _ => Object::Boolean(false),
     }
 }
 
@@ -298,27 +407,24 @@ fn eval_identifier(ident: crate::ast::Identifier, env: Rc<RefCell<Environment>>)
     if let Some(val) = env.borrow().get(&ident.value) {
         return val;
     }
-
-    // Add built-in functions here later if needed
-    // For now, let's just return an error for undeclared identifiers
     Object::Error(format!("Identifier not found: {}", ident.value))
 }
 
 fn eval_expressions(expressions: Vec<Expression>, env: Rc<RefCell<Environment>>) -> Vec<Object> {
-    let mut result = Vec::new();
-    for exp in expressions {
-        let evaluated = eval_expression(exp, env.clone());
-        if is_error(&evaluated) {
-            return vec![evaluated];
-        }
-        result.push(evaluated);
-    }
-    result
+    expressions
+        .into_iter()
+        .map(|exp| eval_expression(exp, env.clone()))
+        .collect()
 }
 
 fn apply_function(func: Object, args: Vec<Object>) -> Object {
     match func {
         Object::Function(function) => {
+            for arg in &args {
+                if is_error(arg) {
+                    return arg.clone();
+                }
+            }
             let extended_env = Rc::new(RefCell::new(Environment::new_enclosed_environment(function.env.clone())));
             for (param_ident, arg_obj) in function.parameters.into_iter().zip(args.into_iter()) {
                 extended_env.borrow_mut().set(param_ident.value, arg_obj);
@@ -326,6 +432,7 @@ fn apply_function(func: Object, args: Vec<Object>) -> Object {
             let evaluated = eval_block_statement(function.body, extended_env.clone());
             unwrap_return_value(evaluated)
         }
+        Object::Builtin(builtin) => builtin(args),
         _ => Object::Error(format!("Not a function: {:?}", func)),
     }
 }

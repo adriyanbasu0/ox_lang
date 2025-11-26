@@ -15,7 +15,7 @@ use std::cell::RefCell;
 fn main() -> io::Result<()> {
     println!("Ox Lang Interpreter initialised.");
 
-    let file_path = "sample.ox";
+    let file_path = "main.ox";
     let mut file = fs::File::open(file_path)?;
     let mut input = String::new();
     file.read_to_string(&mut input)?;
@@ -32,11 +32,9 @@ fn main() -> io::Result<()> {
         return Ok(());
     }
 
-    let mut env = Rc::new(RefCell::new(Environment::new()));
+    let mut env = Rc::new(RefCell::new(Environment::new(Rc::new(RefCell::new(io::stdout())))));
     let evaluated = eval(program, &mut env);
 
     println!("Evaluated result: {:#?}", evaluated);
     Ok(())
 }
-
-

@@ -40,6 +40,7 @@ pub enum Expression {
     If(IfExpression),
     Function(FunctionLiteral),
     Call(CallExpression),
+    Null,
 }
 
 #[derive(Debug, PartialEq, Clone)]

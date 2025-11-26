@@ -1,7 +1,7 @@
 use crate::ast::{
-    BlockStatement, Boolean, CallExpression, Expression, ExpressionStatement,
-    Identifier, InfixExpression, IntLiteral, LetStatement, PrefixExpression, Program,
-    ReturnStatement, Statement, StringLiteral,
+    BlockStatement, Boolean, CallExpression, Expression, ExpressionStatement, Identifier,
+    InfixExpression, IntLiteral, LetStatement, PrefixExpression, Program, ReturnStatement,
+    Statement, StringLiteral,
 };
 use crate::lexer::Lexer;
 use crate::token::Token;
@@ -53,6 +53,7 @@ impl Parser {
         p.register_prefix(Token::String(String::new()), Self::parse_string_literal);
         p.register_prefix(Token::If, Self::parse_if_expression);
         p.register_prefix(Token::Fn, Self::parse_function_literal);
+        p.register_prefix(Token::Null, Self::parse_null_literal);
 
         p.register_infix(Token::Eq, Self::parse_infix_expression);
         p.register_infix(Token::NotEq, Self::parse_infix_expression);
@@ -241,6 +242,11 @@ impl Parser {
             _ => None,
         }
     }
+
+    fn parse_null_literal(_p: &mut Parser) -> Option<Expression> {
+        Some(Expression::Null)
+    }
+
 
     fn parse_prefix_expression(p: &mut Parser) -> Option<Expression> {
         let current_token = p.current_token.clone();
