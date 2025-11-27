@@ -204,6 +204,23 @@ impl Lexer {
     }
 }
 
+impl Iterator for Lexer {
+    type Item = Result<Token, LexerError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.next_token() {
+            Ok(token) => {
+                if token.kind == TokenKind::Eof {
+                    None
+                } else {
+                    Some(Ok(token))
+                }
+            }
+            Err(e) => Some(Err(e)),
+        }
+    }
+}
+
 fn is_letter(ch: char) -> bool {
     ch.is_ascii_alphabetic() || ch == '_'
 }

@@ -1,0 +1,195 @@
+use crate::ast;
+use crate::token::{Token, TokenKind};
+
+grammar;
+
+extern {
+    type Location = usize;
+    type Error = String;
+
+    enum Token {
+        Int => Token { kind: TokenKind::Int, .. },
+        String => Token { kind: TokenKind::String, .. },
+        Let => Token { kind: TokenKind::Let, .. },
+        Print => Token { kind: TokenKind::Print, .. },
+        Identifier => Token { kind: TokenKind::Identifier, .. },
+        True => Token { kind: TokenKind::True, .. },
+        False => Token { kind: TokenKind::False, .. },
+        Null => Token { kind: TokenKind::Null, .. },
+        If => Token { kind: TokenKind::If, .. },
+        Else => Token { kind: TokenKind::Else, .. },
+        Fn => Token { kind: TokenKind::Fn, .. },
+        Return => Token { kind: TokenKind::Return, .. },
+        LBrace => Token { kind: TokenKind::LBrace, .. },
+        RBrace => Token { kind: TokenKind::RBrace, .. },
+        Bang => Token { kind: TokenKind::Bang, .. },
+        Assign => Token { kind: TokenKind::Assign, .. },
+        Semicolon => Token { kind: TokenKind::Semicolon, .. },
+        Comma => Token { kind: TokenKind::Comma, .. },
+        Plus => Token { kind: TokenKind::Plus, .. },
+        Minus => Token { kind: TokenKind::Minus, .. },
+        Asterisk => Token { kind: TokenKind::Asterisk, .. },
+        Slash => Token { kind: TokenKind::Slash, .. },
+        Lt => Token { kind: TokenKind::Lt, .. },
+        Gt => Token { kind: TokenKind::Gt, .. },
+        Eq => Token { kind: TokenKind::Eq, .. },
+        NotEq => Token { kind: TokenKind::NotEq, .. },
+        LParen => Token { kind: TokenKind::LParen, .. },
+        RParen => Token { kind: TokenKind::RParen, .. },
+    }
+}
+
+pub Program: ast::Program = {
+    <statements:Statement*> => ast::Program { statements }
+};
+
+Statement: ast::Statement = {
+    LetStatement,
+    ReturnStatement,
+    PrintStatement,
+    IfStatement,
+    ExpressionStatement,
+};
+
+IfStatement: ast::Statement = {
+    If LParen <cond:Expression> RParen <consequence:BlockStatement> <alternative:ElseClause?> => {
+        let if_expr = ast::Expression::If(ast::IfExpression {
+            condition: Box::new(cond),
+            consequence: consequence,
+            alternative: alternative,
+        });
+        ast::Statement::Expression(ast::ExpressionStatement { expression: if_expr })
+    }
+};
+
+LetStatement: ast::Statement = {
+    Let <name:Ident> Assign <value:Expression> Semicolon =>
+        ast::Statement::Let(ast::LetStatement { name: name, value: value })
+};
+
+ReturnStatement: ast::Statement = {
+    Return <expr:Expression> Semicolon => ast::Statement::Return(ast::ReturnStatement { return_value: expr })
+};
+
+PrintStatement: ast::Statement = {
+    Print <expr:Expression> Semicolon => ast::Statement::Print(ast::PrintStatement { expression: expr })
+};
+
+ExpressionStatement: ast::Statement = {
+    <expr:Expression> Semicolon => ast::Statement::Expression(ast::ExpressionStatement { expression: expr }),
+};
+
+BlockStatement: ast::BlockStatement = {
+    LBrace <statements:Statement*> RBrace => ast::BlockStatement { statements }
+};
+
+pub Expression: ast::Expression = {
+    Comparison,
+};
+
+Comparison: ast::Expression = {
+    <l:Comparison> <op:CompOp> <r:Sum> => ast::Expression::Infix(ast::InfixExpression {
+        left: Box::new(l),
+        operator: op,
+        right: Box::new(r)
+    }),
+    Sum,
+};
+
+CompOp: Token = {
+    Gt => <>,
+    Lt => <>,
+    Eq => <>,
+    NotEq => <>,
+};
+
+Sum: ast::Expression = {
+    <l:Sum> <op:SumOp> <r:Product> => ast::Expression::Infix(ast::InfixExpression {
+        left: Box::new(l),
+        operator: op,
+        right: Box::new(r)
+    }),
+    Product,
+};
+
+SumOp: Token = {
+    Plus => <>,
+    Minus => <>,
+};
+
+Product: ast::Expression = {
+    <l:Product> <op:ProdOp> <r:Prefix> => ast::Expression::Infix(ast::InfixExpression {
+        left: Box::new(l),
+        operator: op,
+        right: Box::new(r)
+    }),
+    Prefix,
+};
+
+ProdOp: Token = {
+    Asterisk => <>,
+    Slash => <>,
+};
+
+Prefix: ast::Expression = {
+    <op:PrefixOp> <expr:Prefix> => ast::Expression::Prefix(ast::PrefixExpression {
+        operator: op,
+        right: Box::new(expr),
+    }),
+    Call,
+};
+
+PrefixOp: Token = {
+    Bang => <>,
+    Minus => <>,
+};
+
+Call: ast::Expression = {
+    <function:Call> LParen <args:CommaList<Expression>> RParen => {
+        ast::Expression::Call(ast::CallExpression {
+            function: Box::new(function),
+            arguments: args,
+        })
+    },
+    Term,
+};
+
+Term: ast::Expression = {
+    <token:Int> => {
+        let value = token.literal.parse::<i64>().unwrap();
+        ast::Expression::IntLiteral(ast::IntLiteral { value })
+    },
+    <token:String> => {
+        ast::Expression::StringLiteral(ast::StringLiteral { value: token.literal.clone() })
+    },
+    Ident => ast::Expression::Identifier(<>),
+    True => ast::Expression::Boolean(ast::Boolean { value: true }),
+    False => ast::Expression::Boolean(ast::Boolean { value: false }),
+    Null => ast::Expression::Null,
+    Fn LParen <params:CommaList<Ident>> RParen <body:BlockStatement> => {
+        ast::Expression::Function(ast::FunctionLiteral {
+            parameters: params,
+            body: body,
+        })
+    },
+    LParen <e:Expression> RParen => e,
+};
+
+ElseClause: ast::BlockStatement = {
+    Else <b:BlockStatement> => b
+};
+
+CommaList<T>: Vec<T> = {
+    <v:(<T> Comma)*> <e:T?> => match e {
+        None => v,
+        Some(e) => {
+            let mut v = v;
+            v.push(e);
+            v
+        }
+    }
+};
+
+Ident: ast::Identifier = {
+    <token:Identifier> => ast::Identifier { value: token.literal.clone() }
+};

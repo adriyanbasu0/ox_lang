@@ -51,14 +51,18 @@ fn main() -> Result<()> {
     // Create a NamedSource for miette to use
     let source = miette::NamedSource::new(file_path.to_string(), input.clone());
 
-    let l = Lexer::new(input); // Pass input to lexer
-    let mut p = Parser::new(l);
-    let program = p.parse_program();
-
-    if !p.errors.is_empty() {
-        let error = p.errors.remove(0); // Get the OxError directly
-        return Err(miette::Report::new(error).with_source_code(source).into());
-    }
+    let p = Parser::new();
+    let program = match p.parse(&input) {
+        Ok(program) => program,
+        Err(e) => {
+            // The error from the parser is a String. We need to convert it to a miette::Report.
+            // For now, let's just print the error and exit.
+            eprintln!("Parser error: {}", e);
+            // We can't easily get a span from the LALRPOP error without more work.
+            // We will just create a generic error.
+            return Err(miette::Report::new(OxError::ParserError(e)).with_source_code(source));
+        }
+    };
 
     let mut env = Rc::new(RefCell::new(Environment::new(Rc::new(RefCell::new(
         io::stdout(),
