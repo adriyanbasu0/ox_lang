@@ -1,10 +1,25 @@
 use lalrpop_util::lalrpop_mod;
+use miette::{Diagnostic, NamedSource};
+use thiserror::Error;
 use crate::ast::Program;
-use crate::lexer::Lexer;
-use crate::token::Token;
+use crate::lexer::{Lexer, LexerError};
+use lalrpop_util::ParseError;
 
-// The lalrpop macro generates a module named `ox`.
 lalrpop_mod!(pub glam);
+
+#[derive(Error, Debug, Diagnostic)]
+#[error("{message}")]
+#[diagnostic(
+    code(parser_error),
+    help("The parser encountered an error. Please check the syntax of your code."),
+)]
+pub struct ParserError {
+    message: String,
+    #[source_code]
+    src: NamedSource<String>,
+    #[label("here")]
+    span: (usize, usize),
+}
 
 pub struct Parser {
     parser: glam::ProgramParser,
@@ -17,7 +32,7 @@ impl Parser {
         }
     }
 
-    pub fn parse(&self, source: &str) -> Result<Program, String> {
+    pub fn parse(&self, source: &str) -> Result<Program, miette::Report> {
         let lexer = Lexer::new(source.to_string());
         let tokens = lexer.map(|token_result| {
             token_result.map(|token| {
@@ -26,10 +41,43 @@ impl Parser {
                 (start, token, end)
             })
         });
-        // The lalrpop parser expects an iterator of `Result<(usize, Token, usize), Error>`.
-        // The lexer now returns `Result<Token, OxError>`. We need to adapt this.
-        // The error type also needs to be compatible. The grammar expects `String`.
-        let mapped_tokens = tokens.map(|res| res.map_err(|err| format!("{:?}", err)));
-        self.parser.parse(mapped_tokens).map_err(|e| format!("{:?}", e))
+
+        self.parser.parse(tokens).map_err(|e| {
+            let (message, span) = match e {
+                ParseError::InvalidToken { location } => {
+                    ("Invalid token".to_string(), (location, 1))
+                }
+                ParseError::UnrecognizedEof { location, expected } => {
+                    (format!("Unrecognized EOF, expected: {:?}", expected), (location, 1))
+                }
+                ParseError::UnrecognizedToken { token, expected } => {
+                    (
+                        format!("Unrecognized token: {:?}, expected: {:?}", token.1, expected),
+                        (token.0, token.2 - token.0),
+                    )
+                }
+                ParseError::ExtraToken { token } => {
+                    (format!("Extra token: {:?}", token.1), (token.0, token.2 - token.0))
+                }
+                ParseError::User { error } => {
+                    let (message, span) = match error {
+                        LexerError::IllegalCharacter { found: _, span } => {
+                            ("Illegal character".to_string(), (span.offset(), span.len()))
+                        }
+                        LexerError::UnterminatedString { span } => {
+                            ("Unterminated string".to_string(), (span.offset(), span.len()))
+                        }
+                    };
+                    (message, span)
+                }
+            };
+
+            let err = ParserError {
+                message,
+                src: NamedSource::new("main.lm", source.to_string()),
+                span,
+            };
+            miette::Report::new(err)
+        })
     }
 }

@@ -132,7 +132,7 @@ impl Lexer {
                         "null" => TokenKind::Null,
                         "print" => TokenKind::Print,
                         "struct" => TokenKind::Struct,
-                        _ => TokenKind::Identifier,
+                        _ => TokenKind::Identifier, // Treat as an identifier
                     };
                     return Ok(Token::new(kind, literal, current_token_start_pos, self.position - current_token_start_pos));
                 } else if is_digit(self.ch) {

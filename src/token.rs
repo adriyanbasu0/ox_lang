@@ -44,7 +44,7 @@ pub enum TokenKind {
 
     // Special
     Eof,
-    Illegal,
+    Error,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]

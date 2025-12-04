@@ -1,11 +1,12 @@
 use crate::ast;
 use crate::token::{Token, TokenKind};
+use crate::lexer::LexerError;
 
 grammar;
 
 extern {
     type Location = usize;
-    type Error = String;
+    type Error = LexerError;
 
     enum Token {
         Int => Token { kind: TokenKind::Int, .. },
@@ -39,6 +40,7 @@ extern {
         NotEq => Token { kind: TokenKind::NotEq, .. },
         LParen => Token { kind: TokenKind::LParen, .. },
         RParen => Token { kind: TokenKind::RParen, .. },
+        Error => Token { kind: TokenKind::Error, .. },
     }
 }
 
